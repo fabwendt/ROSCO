@@ -60,7 +60,8 @@ TYPE, PUBLIC :: ControlParameters
     REAL(4)                             :: PC_RefSpd                    ! Desired (reference) HSS speed for pitch controller, [rad/s].
     REAL(4)                             :: PC_FinePit                   ! Record 5: Below-rated pitch angle set-point (deg) [used only with Bladed Interface]
     REAL(4)                             :: PC_Switch                    ! Angle above lowest minimum pitch angle for switch [rad]
-    
+    REAL(4)                             :: PC_ActBw                     ! Pitch actuator bandwidth [rad/s].
+
     INTEGER(4)                          :: VS_ControlMode               ! Generator torque control mode in above rated conditions {0: constant torque, 1: constant power}
     REAL(4)                             :: VS_GenEff                    ! Generator efficiency mechanical power -> electrical power [-]
     REAL(4)                             :: VS_ArSatTq                   ! Above rated generator torque PI control saturation, [Nm] -- 212900

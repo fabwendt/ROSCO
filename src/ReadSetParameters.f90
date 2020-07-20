@@ -101,6 +101,7 @@ CONTAINS
         READ(UnControllerParameters, *) CntrPar%PC_RefSpd
         READ(UnControllerParameters, *) CntrPar%PC_FinePit
         READ(UnControllerParameters, *) CntrPar%PC_Switch
+        READ(UnControllerParameters, *) CntrPar%PC_ActBw
         READ(UnControllerParameters, *)
 
         !------------------- IPC CONSTANTS -----------------------
@@ -422,6 +423,11 @@ CONTAINS
         IF (CntrPar%PC_MinPit >= CntrPar%PC_MaxPit)  THEN
             aviFAIL = -1
             ErrMsg  = 'PC_MinPit must be less than PC_MaxPit.'
+        ENDIF
+
+        IF (CntrPar%PC_ActBw <= 0.0)  THEN
+            aviFAIL = -1
+            ErrMsg  = 'PC_ActBw must be greater than zero.'
         ENDIF
         
         IF (CntrPar%IPC_KI(1) < 0.0)  THEN
