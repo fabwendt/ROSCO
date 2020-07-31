@@ -224,6 +224,7 @@ TYPE, PUBLIC :: DebugVariables
     REAL(4)                             :: WE_w                       ! Rotor Speed that WSE uses to determine aerodynamic torque, for debug purposes [-]
     REAL(4)                             :: WE_t                      ! Torque that WSE uses, for debug purposes [-]
     REAL(4)                             :: WE_D                      ! Torque that WSE uses, for debug purposes [-]
+    REAL(4)                             :: Region                      ! Control region, if using legacy control
 END TYPE DebugVariables
 
 END MODULE ROSCO_Types

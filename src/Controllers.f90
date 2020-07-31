@@ -126,7 +126,7 @@ CONTAINS
         avrSWAP(45) = LocalVar%PitCom(1)    ! Use the command angle of blade 1 if using collective pitch
     END SUBROUTINE PitchControl
 !-------------------------------------------------------------------------------------------------------------------------------  
-    SUBROUTINE VariableSpeedControl(avrSWAP, CntrPar, LocalVar, objInst)
+    SUBROUTINE VariableSpeedControl(avrSWAP, CntrPar, LocalVar, DebugVar, objInst)
     ! Generator torque controller
     !       VS_State = 0, Error state, for debugging purposes, GenTq = VS_RtTq
     !       VS_State = 1, Region 1(.5) operation, torque control to keep the rotor at cut-in speed towards the Cp-max operational curve
@@ -135,15 +135,27 @@ CONTAINS
     !       VS_State = 4, above-rated operation using pitch control (constant torque mode)
     !       VS_State = 5, above-rated operation using pitch and torque control (constant power mode)
     !       VS_State = 6, Tip-Speed-Ratio tracking PI controller
-        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances
+        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances, DebugVariables
         ! Inputs
         TYPE(ControlParameters), INTENT(INOUT)  :: CntrPar
         TYPE(LocalVariables), INTENT(INOUT)     :: LocalVar
+        TYPE(DebugVariables), INTENT(INOUT)     :: DebugVar
         TYPE(ObjectInstances), INTENT(INOUT)    :: objInst
         ! Allocate Variables
         REAL(C_FLOAT), INTENT(INOUT)            :: avrSWAP(*)    ! The swap array, used to pass data to, and receive data from, the DLL controller.
         REAL(4)                                 :: VS_MaxTq      ! Locally allocated maximum torque saturation limits
         
+        REAL(4)                                 :: VS_Slope15    ! Torque/speed slope of region 1 1/2 cut-in torque ramp , N-m/(rad/s).
+        REAL(4)                                 :: VS_Slope25    ! Torque/speed slope of region 2 1/2 induction generator, N-m/(rad/s).
+        REAL(4)                                 :: VS_Int15    ! Torque/speed slope of region 2 1/2 induction generator, N-m/(rad/s).
+        REAL(4)                                 :: VS_Int25    ! Torque/speed slope of region 2 1/2 induction generator, N-m/(rad/s).
+        REAL(4)                                 :: VS_Rgn2Sp     ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+        REAL(4)                                 :: wg_min       ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+        REAL(4)                                 :: wg_1d5       ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+        REAL(4)                                 :: w2_high       ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+        ! REAL(4)                                 :: wg_1d5       ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+        ! REAL(4)                                 :: VS_Rgn2Sp     ! Transitional generator speed (HSS side) between regions 1 1/2 and 2, rad/s.
+
         ! -------- Variable-Speed Torque Controller --------
         ! Define max torque
         IF (LocalVar%VS_State == 4) THEN
@@ -159,6 +171,51 @@ CONTAINS
             LocalVar%GenTq = PIController(LocalVar%VS_SpdErr, CntrPar%VS_KP(1), CntrPar%VS_KI(1), CntrPar%VS_MinTq, VS_MaxTq, LocalVar%DT, LocalVar%VS_LastGenTrq, .FALSE., objInst%instPI)
             LocalVar%GenTq = saturate(LocalVar%GenTq, CntrPar%VS_MinTq, VS_MaxTq)
         
+        ! Legacy k\omega^2 lookup table control law
+        ELSEIF (CntrPar%VS_ControlMode == 3) THEN
+            
+            ! Calculate linear transition parameters: breakpoints, slopes, intercepts
+            ! This might need some adjustment to be used reliably in ROSCO, but is how the SUMR-D controller is defined...
+            wg_min     = CntrPar%VS_MinOMSpd
+            wg_1d5     = 1.2  * wg_min 
+
+            VS_Slope15  = ( CntrPar%VS_Rgn2K*VS_Rgn2Sp*VS_Rgn2Sp )/( wg_1d5 - wg_min )
+            VS_Int15    = CntrPar%VS_Rgn2K*VS_Rgn2Sp*VS_Rgn2Sp - VS_Slope15 * wg_1d5
+
+            w2_high     = 0.9 * CntrPar%VS_RefSpd  ! check this
+            VS_Slope25  = ( CntrPar%VS_RtTq - CntrPar%VS_Rgn2K*w2_high*w2_high ) / (CntrPar%VS_RefSpd - w2_high) 
+            VS_Int25    = CntrPar%VS_RtTq - VS_Slope25 * CntrPar%VS_RefSpd
+
+            ! PRINT *, 'Region 2.5'
+            ! PRINT *, CntrPar%VS_Rgn2K*w2_high*w2_high
+
+            ! PRINT *, VS_Slope25
+            ! PRINT *, VS_Int25
+
+
+            ! Switch based on generator speed
+            IF ((LocalVar%GenSpeedF > CntrPar%VS_RefSpd) .OR. (LocalVar%PC_PitComT > CntrPar%VS_Rgn3Pitch)) THEN
+                DebugVar%Region     = 3
+                LocalVar%GenTq      = CntrPar%VS_RtTq
+
+            ELSEIF (LocalVar%GenSpeedF > w2_high) THEN
+                DebugVar%Region     = 2.5
+                LocalVar%GenTq      = VS_Slope25 * LocalVar%GenSpeedF + VS_Int25
+
+            ELSEIF (LocalVar%GenSpeedF > wg_1d5) THEN
+                DebugVar%Region = 2
+                LocalVar%GenTq  = CntrPar%VS_Rgn2K * LocalVar%GenSpeedF ** 2
+
+            ELSEIF (LocalVar%GenSpeedF > CntrPar%VS_MinOMSpd) THEN
+                DebugVar%Region = 1.5
+                LocalVar%GenTq  = VS_Slope15 * LocalVar%GenSpeedF
+
+            ELSE
+                DebugVar%Region = 1
+                LocalVar%GenTq  = 0.
+
+            END IF
+
         ! K*Omega^2 control law with PI torque control in transition regions
         ELSE
             ! Update PI loops for region 1.5 and 2.5 PI control
