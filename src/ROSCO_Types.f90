@@ -114,6 +114,13 @@ TYPE, PUBLIC :: ControlParameters
     REAL(4), DIMENSION(:), ALLOCATABLE  :: PS_WindSpeeds                ! Wind speeds corresponding to minimum blade pitch angles [m/s]
     REAL(4), DIMENSION(:), ALLOCATABLE  :: PS_BldPitchMin               ! Minimum blade pitch angles [rad]
 
+    INTEGER(4)                          :: PwC_Mode                     ! Pitch saturation mode {0: no power control, 1: constant power control, 2: user-defined open-loop power control defined by <rootname>_OL_R.dat}
+    INTEGER(4)                          :: PwC_PwrRating_N            ! Number of values in minimum blade pitch lookup table (should equal number of values in PwC_WindSpeeds and PwC_BldPitchMin)
+    REAL(4), DIMENSION(:), ALLOCATABLE  :: PwC_PwrRating                ! Power rating (-) as a fraction of rated/available power
+    REAL(4), DIMENSION(:), ALLOCATABLE  :: PwC_BldPitchMin              ! Minimum pitch setting for below-rated power control
+    REAL(4)                             :: PwC_ConstPwr                 ! Constant Power
+    CHARACTER(1024)                     :: PwC_OpenLoopInp              ! File containing open loop power reference value
+
     INTEGER(4)                          :: SD_Mode                      ! Shutdown mode {0: no shutdown procedure, 1: pitch to max pitch at shutdown}
     REAL(4)                             :: SD_MaxPit                    ! Maximum blade pitch angle to initiate shutdown, [rad]
     REAL(4)                             :: SD_CornerFreq                ! Cutoff Frequency for first order low-pass filter for blade pitch angle, [rad/s]
@@ -199,6 +206,10 @@ TYPE, PUBLIC :: LocalVariables
     REAL(4)                             :: Fl_PitCom                           ! Shutdown, .FALSE. if inactive, .TRUE. if active
     REAL(4)                             :: NACIMU_FA_AccF
     REAL(4)                             :: Flp_Angle(3)                 ! Flap Angle (rad)
+    REAL(4)                             :: PwC_R                        ! Power Reference
+    REAL(4)                             :: PwC_MinPitch                 ! Min pitch for power control
+
+
     END TYPE LocalVariables
 
 TYPE, PUBLIC :: ObjectInstances
@@ -224,6 +235,9 @@ TYPE, PUBLIC :: DebugVariables
     REAL(4)                             :: WE_w                       ! Rotor Speed that WSE uses to determine aerodynamic torque, for debug purposes [-]
     REAL(4)                             :: WE_t                      ! Torque that WSE uses, for debug purposes [-]
     REAL(4)                             :: WE_D                      ! Torque that WSE uses, for debug purposes [-]
+    REAL(4)                             :: PwC_R                     ! Power reference R [-]
+    REAL(4)                             :: Om_tau                    ! Generator speed reference for torque control
+    REAL(4)                             :: Om_theta                  ! Generator speed reference for pitch control
 END TYPE DebugVariables
 
 END MODULE ROSCO_Types

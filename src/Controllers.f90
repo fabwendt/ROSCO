@@ -93,6 +93,12 @@ CONTAINS
             LocalVar%PC_MinPit = CntrPar%PC_MinPit
         ENDIF
 
+        ! Pitch Saturation due to Power Control
+        IF (CntrPar%PwC_Mode > 0) THEN
+            LocalVar%PwC_MinPitch   = interp1d(CntrPar%PwC_PwrRating, CntrPar%PwC_BldPitchMin, LocalVar%PwC_R)
+            LocalVar%PC_MinPit      = max(LocalVar%PC_MinPit, LocalVar%PwC_MinPitch)
+        ENDIF
+
         ! Shutdown
         IF (CntrPar%SD_Mode == 1) THEN
             LocalVar%PC_PitComT = Shutdown(LocalVar, CntrPar, objInst)

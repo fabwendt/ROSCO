@@ -67,6 +67,7 @@ CONTAINS
         READ(UnControllerParameters, *) CntrPar%SD_Mode        
         READ(UnControllerParameters, *) CntrPar%FL_Mode        
         READ(UnControllerParameters, *) CntrPar%Flp_Mode        
+        READ(UnControllerParameters, *) CntrPar%PwC_Mode        
         READ(UnControllerParameters, *)
 
         !----------------- FILTER CONSTANTS ---------------------
@@ -193,6 +194,22 @@ CONTAINS
         READ(UnControllerParameters, *) CntrPar%PS_BldPitchMin
         READ(UnControllerParameters, *) 
 
+        !------------ POWER CONTROL ------------
+        READ(UnControllerParameters, *)      
+        READ(UnControllerParameters, *) CntrPar%PwC_PwrRating_N  
+        ALLOCATE(CntrPar%PwC_PwrRating(CntrPar%PwC_PwrRating_N))
+        READ(UnControllerParameters, *) CntrPar%PwC_PwrRating
+        ALLOCATE(CntrPar%PwC_BldPitchMin(CntrPar%PwC_PwrRating_N))
+        READ(UnControllerParameters, *) CntrPar%PwC_BldPitchMin
+        READ(UnControllerParameters, *) CntrPar%PwC_ConstPwr
+        READ(UnControllerParameters, *) CntrPar%PwC_OpenLoopInp
+        READ(UnControllerParameters, *) 
+
+        PRINT *, CntrPar%PwC_PwrRating
+        PRINT *, CntrPar%PwC_BldPitchMin
+        PRINT *, CntrPar%PwC_ConstPwr
+        
+
         !------------ SHUTDOWN ------------
         READ(UnControllerParameters, *)      
         READ(UnControllerParameters, *) CntrPar%SD_MaxPit  
@@ -226,19 +243,26 @@ CONTAINS
     END SUBROUTINE ReadControlParameterFileSub
     ! -----------------------------------------------------------------------------------
     ! Calculate setpoints for primary control actions    
-    SUBROUTINE ComputeVariablesSetpoints(CntrPar, LocalVar, objInst)
-        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances
+    SUBROUTINE ComputeVariablesSetpoints(CntrPar, LocalVar, DebugVar, objInst)
+        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances, DebugVariables
         
         ! Allocate variables
         TYPE(ControlParameters), INTENT(INOUT)  :: CntrPar
         TYPE(LocalVariables), INTENT(INOUT)     :: LocalVar
+        TYPE(DebugVariables), INTENT(INOUT)     :: DebugVar
         TYPE(ObjectInstances), INTENT(INOUT)    :: objInst
 
         REAL(4)                                 :: VS_RefSpd        ! Referece speed for variable speed torque controller, [rad/s] 
         REAL(4)                                 :: PC_RefSpd        ! Referece speed for pitch controller, [rad/s] 
         REAL(4)                                 :: Omega_op         ! Optimal TSR-tracking generator speed, [rad/s]
-        ! temp
         ! REAL(4)                                 :: VS_TSRop = 7.5
+
+        ! Calculate Power reference
+        IF (CntrPar%PwC_Mode == 0) THEN
+            LocalVar%PwC_R  = 1.0
+        ELSEIF (CntrPar%PwC_Mode == 1) THEN  ! constant power
+            LocalVar%PwC_R  = CntrPar%PwC_ConstPwr
+        ENDIF  ! add open loop next
 
         ! ----- Calculate yaw misalignment error -----
         LocalVar%Y_MErr = LocalVar%Y_M + CntrPar%Y_MErrSet ! Yaw-alignment error
@@ -246,9 +270,9 @@ CONTAINS
         ! ----- Pitch controller speed and power error -----
         ! Implement setpoint smoothing
         IF (LocalVar%SS_DelOmegaF < 0) THEN
-            PC_RefSpd = CntrPar%PC_RefSpd - LocalVar%SS_DelOmegaF
+            PC_RefSpd = LocalVar%PwC_R * CntrPar%PC_RefSpd - LocalVar%SS_DelOmegaF
         ELSE
-            PC_RefSpd = CntrPar%PC_RefSpd
+            PC_RefSpd = LocalVar%PwC_R * CntrPar%PC_RefSpd
         ENDIF
 
         LocalVar%PC_SpdErr = PC_RefSpd - LocalVar%GenSpeedF            ! Speed error
@@ -258,9 +282,9 @@ CONTAINS
         ! Define VS reference generator speed [rad/s]
         IF (CntrPar%VS_ControlMode == 2) THEN
             VS_RefSpd = (CntrPar%VS_TSRopt * LocalVar%We_Vw_F / CntrPar%WE_BladeRadius) * CntrPar%WE_GearboxRatio
-            VS_RefSpd = saturate(VS_RefSpd,CntrPar%VS_MinOMSpd, CntrPar%VS_RefSpd)
+            VS_RefSpd = saturate(LocalVar%PwC_R * VS_RefSpd,CntrPar%VS_MinOMSpd, CntrPar%VS_RefSpd)
         ELSE
-            VS_RefSpd = CntrPar%VS_RefSpd
+            VS_RefSpd = LocalVar%PwC_R * CntrPar%VS_RefSpd
         ENDIF 
         
         ! Implement setpoint smoothing
@@ -285,6 +309,10 @@ CONTAINS
         LocalVar%VS_SpdErrAr = VS_RefSpd - LocalVar%GenSpeedF               ! Current speed error - Region 2.5 PI-control (Above Rated)
         LocalVar%VS_SpdErrBr = CntrPar%VS_MinOMSpd - LocalVar%GenSpeedF     ! Current speed error - Region 1.5 PI-control (Below Rated)
     
+        ! Save Debug Variables
+        DebugVar%PwC_R      = LocalVar%PwC_R
+        DebugVar%Om_tau     = VS_RefSpd
+        DebugVar%Om_theta   = PC_RefSpd
     
     END SUBROUTINE ComputeVariablesSetpoints
     ! -----------------------------------------------------------------------------------
