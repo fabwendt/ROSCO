@@ -120,6 +120,8 @@ TYPE, PUBLIC :: ControlParameters
     REAL(4), DIMENSION(:), ALLOCATABLE  :: PwC_BldPitchMin              ! Minimum pitch setting for below-rated power control
     REAL(4)                             :: PwC_ConstPwr                 ! Constant Power
     CHARACTER(1024)                     :: PwC_OpenLoopInp              ! File containing open loop power reference value
+    REAL(4), DIMENSION(:), ALLOCATABLE  :: PwC_Time                     ! Time breakpoints for open loop power control
+    REAL(4), DIMENSION(:,:), ALLOCATABLE  :: PwC_R_Time                   ! Power rating (-) at time breakpoints, 2D because Open loop channels are
 
     INTEGER(4)                          :: SD_Mode                      ! Shutdown mode {0: no shutdown procedure, 1: pitch to max pitch at shutdown}
     REAL(4)                             :: SD_MaxPit                    ! Maximum blade pitch angle to initiate shutdown, [rad]

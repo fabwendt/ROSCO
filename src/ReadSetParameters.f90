@@ -205,9 +205,17 @@ CONTAINS
         READ(UnControllerParameters, *) CntrPar%PwC_OpenLoopInp
         READ(UnControllerParameters, *) 
 
-        PRINT *, CntrPar%PwC_PwrRating
-        PRINT *, CntrPar%PwC_BldPitchMin
-        PRINT *, CntrPar%PwC_ConstPwr
+        ! Read Open Loop input if CntrPar%PwC_Mode == 2
+        IF (CntrPar%PwC_Mode == 1) THEN
+            PRINT *, 'Implementing power control with constant R'
+        ELSE IF (CntrPar%PwC_Mode == 2) THEN
+            CALL Read_OL_Input(CntrPar%PwC_OpenLoopInp,109,1,CntrPar%PwC_Time,CntrPar%PwC_R_Time)
+            PRINT *, 'Implementing open loop power control with R defined in '//TRIM(CntrPar%PwC_OpenLoopInp)
+        END IF
+        ! PRINT *, 'Implementing constant power control with R = '//LocalVar%PwC_R
+
+        PRINT *, CntrPar%PwC_Time
+        PRINT *, CntrPar%PwC_R_Time
         
 
         !------------ SHUTDOWN ------------
@@ -262,6 +270,8 @@ CONTAINS
             LocalVar%PwC_R  = 1.0
         ELSEIF (CntrPar%PwC_Mode == 1) THEN  ! constant power
             LocalVar%PwC_R  = CntrPar%PwC_ConstPwr
+        ELSEIF (CntrPar%PwC_Mode == 2) THEN  ! open loop power
+            LocalVar%PwC_R  = interp1d(CntrPar%PwC_Time,RESHAPE(CntrPar%PwC_R_Time(:,1),(/size(CntrPar%PwC_Time)/)),LocalVar%Time)
         ENDIF  ! add open loop next
 
         ! ----- Calculate yaw misalignment error -----
@@ -673,4 +683,141 @@ CONTAINS
         END DO
     
     END SUBROUTINE ReadCpFile
+
+    ! ------------------------------------------------------
+    ! Read Open Loop Control Inputs
+    ! 
+    ! Timeseries or lookup tables of the form
+    ! index (time or wind speed)   channel_1 \t channel_2 \t channel_3 ...
+    SUBROUTINE Read_OL_Input(OL_InputFileName, Unit_OL_Input, NumChannels, Breakpoints, Channels)
+
+        CHARACTER(1024), INTENT(IN)                             :: OL_InputFileName    ! DISCON input filename
+        INTEGER(4), INTENT(IN)                                  :: Unit_OL_Input 
+        INTEGER(4), INTENT(IN)                                  :: NumChannels     ! Number of open loop channels being defined
+
+        LOGICAL                                                 :: FileExists
+        INTEGER                                                 :: IOS                                                 ! I/O status of OPEN.
+        CHARACTER(1024)                                         :: Line              ! Temp variable for reading whole line from file
+        INTEGER(4)                                              :: NumComments
+        INTEGER(4)                                              :: NumDataLines
+        INTEGER(4)                                              :: NumCols 
+        REAL(4)                                                 :: TmpData(NumChannels+1)  ! Temp variable for reading all columns from a line
+        CHARACTER(15)                                           :: NumString
+
+        REAL(4), INTENT(OUT), DIMENSION(:), ALLOCATABLE         :: Breakpoints    ! Breakpoints of open loop Channels
+        REAL(4), INTENT(OUT), DIMENSION(:,:), ALLOCATABLE       :: Channels         ! Open loop channels
+        INTEGER(4)                                              :: I,J
+
+        NumCols             = NumChannels + 1
+
+        !-------------------------------------------------------------------------------------------------
+        ! Read from input file, borrowed (read: copied) from (Open)FAST team...thanks!
+        !-------------------------------------------------------------------------------------------------
+
+        !-------------------------------------------------------------------------------------------------
+        ! Open the file for reading
+        !-------------------------------------------------------------------------------------------------
+
+        INQUIRE (FILE = OL_InputFileName, EXIST = FileExists)
+
+        IF ( .NOT. FileExists) THEN
+            PRINT *, TRIM(OL_InputFileName)// ' does not exist, setting Channels = 1 for all time'
+            ALLOCATE(Breakpoints(2))
+            ALLOCATE(Channels(2,1))
+            Channels(1,1) = 1;              Channels(2,1)           = 1
+            Breakpoints(1) = 0;             Breakpoints(2)          = 90000;
+
+        ELSE
+
+            OPEN( Unit_OL_Input, FILE=TRIM(OL_InputFileName), STATUS='OLD', FORM='FORMATTED', IOSTAT=IOS, ACTION='READ' )
+
+            IF (IOS /= 0) THEN
+                PRINT *, 'Cannot open ' // TRIM(OL_InputFileName) // ', setting R = 1 for all time'
+                ALLOCATE(Breakpoints(2))
+                ALLOCATE(Channels(2,1))
+                Channels(1,1) = 1;              Channels(2,1) = 1
+                Breakpoints(1) = 0;             Breakpoints(2)       = 90000;
+                CLOSE(Unit_OL_Input)
+            
+            ELSE
+                ! Do all the stuff!
+
+                !-------------------------------------------------------------------------------------------------
+                ! Find the number of comment lines
+                !-------------------------------------------------------------------------------------------------
+
+                LINE = '!'                          ! Initialize the line for the DO WHILE LOOP
+                NumComments = -1                    ! the last line we read is not a comment, so we'll initialize this to -1 instead of 0
+
+                DO WHILE ( (INDEX( LINE, '!' ) > 0) .OR. (INDEX( LINE, '#' ) > 0) .OR. (INDEX( LINE, '%' ) > 0) ) ! Lines containing "!" are treated as comment lines
+                    NumComments = NumComments + 1
+                    
+                    READ(Unit_OL_Input,'( A )',IOSTAT=IOS) LINE
+
+                    ! NWTC_IO has some error catching here that we'll skip for now
+            
+                END DO !WHILE
+
+                !-------------------------------------------------------------------------------------------------
+                ! Find the number of data lines
+                !-------------------------------------------------------------------------------------------------
+
+                NumDataLines = 0
+
+                READ(LINE,*,IOSTAT=IOS) ( TmpData(I), I=1,NumCols ) ! this line was read when we were figuring out the comment lines; let's make sure it contains
+
+                DO WHILE (IOS == 0)  ! read the rest of the file (until an error occurs)
+                    NumDataLines = NumDataLines + 1
+                    
+                    READ(Unit_OL_Input,*,IOSTAT=IOS) ( TmpData(I), I=1,NumCols )
+                
+                END DO !WHILE
+            
+            
+                IF (NumDataLines < 1) THEN
+                    WRITE (NumString,'(I11)')  NumComments
+                    PRINT *, 'Error: '//TRIM(NumString)//' comment lines were found in the uniform wind file, '// &
+                                'but the first data line does not contain the proper format.'
+                    CLOSE(Unit_OL_Input)
+                END IF
+
+                !-------------------------------------------------------------------------------------------------
+                ! Allocate arrays for the uniform wind data
+                !-------------------------------------------------------------------------------------------------
+                ALLOCATE(Breakpoints(NumDataLines))
+                ALLOCATE(Channels(NumDataLines,NumChannels))
+
+                !-------------------------------------------------------------------------------------------------
+                ! Rewind the file (to the beginning) and skip the comment lines
+                !-------------------------------------------------------------------------------------------------
+
+                REWIND( Unit_OL_Input )
+
+                DO I=1,NumComments
+                    READ(Unit_OL_Input,'( A )',IOSTAT=IOS) LINE
+                END DO !I
+            
+
+                !-------------------------------------------------------------------------------------------------
+                ! Read the data arrays
+                !-------------------------------------------------------------------------------------------------
+            
+                DO I=1,NumDataLines
+                
+                    READ(Unit_OL_Input,*,IOSTAT=IOS) ( TmpData(J), J=1,NumCols )
+
+                    IF (IOS > 0) THEN
+                        CLOSE(Unit_OL_Input)
+                    END IF
+
+                    Breakpoints(I)          = TmpData(1)
+                    Channels(I,:)        = TmpData(2:)
+            
+                END DO !I     
+            END IF
+        END IF
+    
+    END SUBROUTINE Read_OL_Input
+
+
 END MODULE ReadSetParameters
