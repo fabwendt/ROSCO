@@ -238,6 +238,13 @@ CONTAINS
         REAL(8)                                 :: Omega_op         ! Optimal TSR-tracking generator speed, [rad/s]
         ! temp
         ! REAL(8)                                 :: VS_TSRop = 7.5
+		REAL(8)                                 :: msg_var
+		REAL(8)                                 ::rpm_upper_lim
+		REAL(8)                                 ::rpm_lower_lim
+			
+		REAL(8)                                 ::rad_upper_lim
+		REAL(8)                                 ::rad_lower_lim
+		REAL(8)                                 ::time_lim												
 
         ! ----- Calculate yaw misalignment error -----
         LocalVar%Y_MErr = LocalVar%Y_M + CntrPar%Y_MErrSet ! Yaw-alignment error
@@ -258,6 +265,105 @@ CONTAINS
         IF ((CntrPar%VS_ControlMode == 2) .OR. (CntrPar%VS_ControlMode == 3)) THEN
             VS_RefSpd = (CntrPar%VS_TSRopt * LocalVar%We_Vw_F / CntrPar%WE_BladeRadius) * CntrPar%WE_GearboxRatio
             VS_RefSpd = saturate(VS_RefSpd,CntrPar%VS_MinOMSpd, CntrPar%VS_RefSpd)
+			
+            ! ----- Frequency Exclusion -----
+					
+			time_lim=15.0
+			
+			rpm_upper_lim=6.65+6.65*0.1
+			rpm_lower_lim=6.65-6.65*0.1
+			
+			rad_upper_lim=(2*3.1415927*rpm_upper_lim)/60
+			rad_lower_lim=(2*3.1415927*rpm_lower_lim)/60
+			
+			msg_var=0.0
+			IF (MODULO(LocalVar%Time, 1.0) == 0) THEN
+				msg_var=1.0
+			ENDIF
+			
+			if (msg_var>0.0) THEN
+				print *,"+++++++++++++++++=MESSAGE START+++++++++++++++++++"
+				print *,"Sim Time:",LocalVar%time
+				print *,"Gen Speed:",(LocalVar%GenSpeedF /(2*3.1415927))*60
+				!print *,"New Initial set Speed:",(VS_RefSpd/(2*3.1415927))*60
+			ENDIF
+			
+			IF (LocalVar%VS_ExceedStart == 0.0) THEN
+				LocalVar%VS_ExceedTime=0.0
+			ELSE
+				LocalVar%VS_ExceedTime=LocalVar%Time-LocalVar%VS_ExceedStart
+			ENDIF
+			
+			!We are in the exclusion zone
+			IF (LocalVar%GenSpeedF < rad_upper_lim) THEN
+				IF (LocalVar%GenSpeedF > rad_lower_lim) THEN 
+					IF (LocalVar%VS_ride_down==1.0) THEN
+						if (msg_var>0.0) THEN
+							print *,"MSG67: Riding Down."
+						ENDIF
+						VS_RefSpd=rad_lower_lim
+					ELSE IF (LocalVar%VS_ride_up==1.0) THEN
+						if (msg_var>0.0) THEN
+							print *,"MSG67: Riding Up."
+						ENDIF
+						VS_RefSpd=rad_upper_lim
+					ELSE
+						!We should not be here...
+						IF (LocalVar%GenSpeedF < (rad_lower_lim+(rad_upper_lim-rad_lower_lim)*0.5)) THEN
+							IF (LocalVar%VS_ExceedTime>time_lim) THEN
+								if (msg_var>0.0) THEN
+									print *,"MSG67: Allowing ride up."
+								ENDIF
+								VS_RefSpd=rad_upper_lim
+								LocalVar%VS_ride_up=1.0
+							ELSE
+								if (msg_var>0.0) THEN
+									print *,"MSG68: Hold at lower limit."
+								ENDIF
+								VS_RefSpd=rad_lower_lim
+								IF (LocalVar%VS_ExceedStart== 0.0) THEN
+									LocalVar%VS_ExceedStart=LocalVar%Time
+								ENDIF
+							ENDIF
+						ELSE
+							IF (LocalVar%VS_ExceedTime>time_lim) THEN
+								if (msg_var>0.0) THEN
+									print *,"MSG67: Allowing ride down."
+								ENDIF
+								VS_RefSpd=rad_lower_lim
+								LocalVar%VS_ride_down=1.0
+							ELSE
+								if (msg_var>0.0) THEN
+									print *,"MSG68: Hold at upper limit."
+								ENDIF
+								VS_RefSpd=rad_upper_lim
+								IF (LocalVar%VS_ExceedStart== 0.0) THEN
+									LocalVar%VS_ExceedStart=LocalVar%Time
+								ENDIF
+							ENDIF
+						ENDIF
+					ENDIF
+				ENDIF
+			ENDIF
+			
+			!Above exclusion zone, all good
+			IF (LocalVar%GenSpeedF >= rad_upper_lim) THEN
+				!IF (VS_RefSpd > rad_upper_lim) THEN 
+					LocalVar%VS_ride_down=0.0
+					LocalVar%VS_ride_up=0.0
+					LocalVar%VS_ExceedStart=0.0
+				!ENDIF
+			ENDIF
+			
+			!Below exculsion zone, all good
+			IF (LocalVar%GenSpeedF <= rad_lower_lim) THEN
+				!IF (VS_RefSpd < rad_lower_lim) THEN 
+					LocalVar%VS_ride_down=0.0
+					LocalVar%VS_ride_up=0.0
+					LocalVar%VS_ExceedStart=0.0
+				!ENDIF
+			ENDIF
+			
         ELSE
             VS_RefSpd = CntrPar%VS_RefSpd
         ENDIF 
@@ -578,6 +684,9 @@ CONTAINS
             ENDIF            
             LocalVar%VS_LastGenTrq = LocalVar%GenTq       
             
+			LocalVar%VS_ExceedTime  = 0.0     
+			LocalVar%VS_ride_up  = 0.0  
+			LocalVar%VS_ride_down  = 0.0						 
             ! Check validity of input parameters:
             CALL Assert(LocalVar, CntrPar, avrSWAP, aviFAIL, ErrMsg, size_avcMSG)
             

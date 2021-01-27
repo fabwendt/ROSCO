@@ -199,6 +199,10 @@ TYPE, PUBLIC :: LocalVariables
     REAL(8)                             :: Fl_PitCom                           ! Shutdown, .FALSE. if inactive, .TRUE. if active
     REAL(8)                             :: NACIMU_FA_AccF
     REAL(8)                             :: Flp_Angle(3)                 ! Flap Angle (rad)
+	REAL(8)                             :: VS_ride_up
+	REAL(8)                             :: VS_ride_down																												  
+	REAL(8)                             :: VS_ExceedStart																													 
+	REAL(8)                             :: VS_ExceedTime 											  
     END TYPE LocalVariables
 
 TYPE, PUBLIC :: ObjectInstances
