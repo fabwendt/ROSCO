@@ -10,6 +10,7 @@ Source/x64/
 Source/Release/
 *build*
 Makefile
+*.dll
 
 
 # Archive

@@ -268,10 +268,12 @@ CONTAINS
 			
             ! ----- Frequency Exclusion -----
 					
-			time_lim=15.0
+			time_lim=25.0
 			
-			rpm_upper_lim=6.65+6.65*0.1
-			rpm_lower_lim=6.65-6.65*0.1
+			!rpm_upper_lim=6.65+6.65*0.1
+			!rpm_lower_lim=6.65-6.65*0.1
+			rpm_upper_lim=6.6+6.6*0.10
+			rpm_lower_lim=6.6-6.6*0.10
 			
 			rad_upper_lim=(2*3.1415927*rpm_upper_lim)/60
 			rad_lower_lim=(2*3.1415927*rpm_lower_lim)/60
@@ -298,24 +300,37 @@ CONTAINS
 			IF (LocalVar%GenSpeedF < rad_upper_lim) THEN
 				IF (LocalVar%GenSpeedF > rad_lower_lim) THEN 
 					IF (LocalVar%VS_ride_down==1.0) THEN
-						if (msg_var>0.0) THEN
-							print *,"MSG67: Riding Down."
+						IF (LocalVar%VS_ExceedTime>time_lim) THEN
+							print *,"MSG97: CANCLE Ride Down."
+							VS_RefSpd=rad_upper_lim
+							LocalVar%VS_ExceedStart=0.0
+							LocalVar%VS_ride_down=0.0
+						ELSE
+							if (msg_var>0.0) THEN
+								print *,"MSG67: Riding Down."
+							ENDIF
+							VS_RefSpd=rad_lower_lim
 						ENDIF
-						VS_RefSpd=rad_lower_lim
 					ELSE IF (LocalVar%VS_ride_up==1.0) THEN
-						if (msg_var>0.0) THEN
-							print *,"MSG67: Riding Up."
+						IF (LocalVar%VS_ExceedTime>time_lim) THEN
+							print *,"MSG87: CANCLE Ride Up."
+							VS_RefSpd=rad_lower_lim
+							LocalVar%VS_ExceedStart=0.0
+							LocalVar%VS_ride_up=0.0
+						ELSE
+							if (msg_var>0.0) THEN
+								print *,"MSG67: Riding Up."
+							ENDIF
+							VS_RefSpd=rad_upper_lim
 						ENDIF
-						VS_RefSpd=rad_upper_lim
 					ELSE
 						!We should not be here...
 						IF (LocalVar%GenSpeedF < (rad_lower_lim+(rad_upper_lim-rad_lower_lim)*0.5)) THEN
 							IF (LocalVar%VS_ExceedTime>time_lim) THEN
-								if (msg_var>0.0) THEN
-									print *,"MSG67: Allowing ride up."
-								ENDIF
+								print *,"MSG67: Allowing ride up."
 								VS_RefSpd=rad_upper_lim
 								LocalVar%VS_ride_up=1.0
+								LocalVar%VS_ExceedStart=LocalVar%Time
 							ELSE
 								if (msg_var>0.0) THEN
 									print *,"MSG68: Hold at lower limit."
@@ -327,11 +342,10 @@ CONTAINS
 							ENDIF
 						ELSE
 							IF (LocalVar%VS_ExceedTime>time_lim) THEN
-								if (msg_var>0.0) THEN
-									print *,"MSG67: Allowing ride down."
-								ENDIF
+								print *,"MSG67: Allowing ride down."
 								VS_RefSpd=rad_lower_lim
 								LocalVar%VS_ride_down=1.0
+								LocalVar%VS_ExceedStart=LocalVar%Time
 							ELSE
 								if (msg_var>0.0) THEN
 									print *,"MSG68: Hold at upper limit."
