@@ -226,7 +226,7 @@ CONTAINS
     ! -----------------------------------------------------------------------------------
     ! Calculate setpoints for primary control actions    
     SUBROUTINE ComputeVariablesSetpoints(CntrPar, LocalVar, objInst)
-        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances
+        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances, PerformanceData
         USE Constants
         ! Allocate variables
         TYPE(ControlParameters), INTENT(INOUT)  :: CntrPar
@@ -244,7 +244,12 @@ CONTAINS
 			
 		REAL(8)                                 ::rad_upper_lim
 		REAL(8)                                 ::rad_lower_lim
-		REAL(8)                                 ::time_lim												
+		REAL(8)                                 ::time_lim		
+        REAL(8)                                 ::excl_fact	
+        REAL(8)                                 ::transit_time		
+		REAL(8)                                 ::tau_r
+		REAL(8)                                 ::hold_zone_divison
+		REAL(8)                                 ::slow_transt
 
         ! ----- Calculate yaw misalignment error -----
         LocalVar%Y_MErr = LocalVar%Y_M + CntrPar%Y_MErrSet ! Yaw-alignment error
@@ -264,16 +269,21 @@ CONTAINS
         ! Define VS reference generator speed [rad/s]
         IF ((CntrPar%VS_ControlMode == 2) .OR. (CntrPar%VS_ControlMode == 3)) THEN
             VS_RefSpd = (CntrPar%VS_TSRopt * LocalVar%We_Vw_F / CntrPar%WE_BladeRadius) * CntrPar%WE_GearboxRatio
-            VS_RefSpd = saturate(VS_RefSpd,CntrPar%VS_MinOMSpd, CntrPar%VS_RefSpd)
+            
 			
             ! ----- Frequency Exclusion -----
-					
-			time_lim=25.0
 			
-			!rpm_upper_lim=6.65+6.65*0.1
-			!rpm_lower_lim=6.65-6.65*0.1
-			rpm_upper_lim=6.6+6.6*0.10
-			rpm_lower_lim=6.6-6.6*0.10
+			!How long we need to hold a lower/upper limit before we can consider ride up/down:
+			time_lim=25.0
+			!How long until we cancle a ride up/down:
+			transit_time=10.0
+			!Used to define the range when we allow ride up/down due to large rotor speed excursions from upper/lower limit... Larger number, smaller excusions will trigger ride up/down:
+			hold_zone_divison=4
+			!How long are we lingering close to the optimal speed setting before we move the setpoint to the lower/upper limit when riding down/up:
+			slow_transt=4.
+			
+			rpm_upper_lim=6.3+6.3*0.12
+			rpm_lower_lim=6.3-6.3*0.12
 			
 			rad_upper_lim=(2*3.1415927*rpm_upper_lim)/60
 			rad_lower_lim=(2*3.1415927*rpm_lower_lim)/60
@@ -287,7 +297,6 @@ CONTAINS
 				print *,"+++++++++++++++++=MESSAGE START+++++++++++++++++++"
 				print *,"Sim Time:",LocalVar%time
 				print *,"Gen Speed:",(LocalVar%GenSpeedF /(2*3.1415927))*60
-				!print *,"New Initial set Speed:",(VS_RefSpd/(2*3.1415927))*60
 			ENDIF
 			
 			IF (LocalVar%VS_ExceedStart == 0.0) THEN
@@ -300,69 +309,94 @@ CONTAINS
 			IF (LocalVar%GenSpeedF < rad_upper_lim) THEN
 				IF (LocalVar%GenSpeedF > rad_lower_lim) THEN 
 					IF (LocalVar%VS_ride_down==1.0) THEN
-						IF (LocalVar%VS_ExceedTime>time_lim) THEN
+						IF (LocalVar%VS_ExceedTime>transit_time) THEN
 							print *,"MSG97: CANCLE Ride Down."
-							VS_RefSpd=rad_upper_lim
+							
+							!Use the same set point calculation as used when holding at the upper limit (avoid unnecessary jump in rotor torque)
+							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_lower_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
+							VS_RefSpd=MIN(rad_lower_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
+							
 							LocalVar%VS_ExceedStart=0.0
 							LocalVar%VS_ride_down=0.0
 						ELSE
 							if (msg_var>0.0) THEN
 								print *,"MSG67: Riding Down."
 							ENDIF
-							VS_RefSpd=rad_lower_lim
+							
+							!Blend between optimum setpoint and lower limit (use slow_trans time period to smoothen jump to rad_lower_lim), once approaching rad_lower_lim, also move away from rad_lower_lim setpoint and towards the optimum speed setpoint
+							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_lower_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
+							VS_RefSpd=MIN(rad_lower_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
+							
 						ENDIF
 					ELSE IF (LocalVar%VS_ride_up==1.0) THEN
-						IF (LocalVar%VS_ExceedTime>time_lim) THEN
+						IF (LocalVar%VS_ExceedTime>transit_time) THEN
 							print *,"MSG87: CANCLE Ride Up."
-							VS_RefSpd=rad_lower_lim
+                            
+							!Use the same set point calculation as used when holding at the lower limit (avoid unnecessary jump in rotor torque)
+							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_upper_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
+							VS_RefSpd=MAX(rad_upper_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
+							
 							LocalVar%VS_ExceedStart=0.0
 							LocalVar%VS_ride_up=0.0
 						ELSE
 							if (msg_var>0.0) THEN
 								print *,"MSG67: Riding Up."
 							ENDIF
-							VS_RefSpd=rad_upper_lim
+							
+							!Blend between optimum setpoint and upper limit (use slow_trans time period to smoothen jump to rad_upper_lim), once approaching rad_upper_lim, also move away from rad_upper_lim setpoint and towards the optimum speed setpoint
+							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_upper_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
+							VS_RefSpd=MAX(rad_upper_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
+							
 						ENDIF
 					ELSE
 						!We should not be here...
 						IF (LocalVar%GenSpeedF < (rad_lower_lim+(rad_upper_lim-rad_lower_lim)*0.5)) THEN
-							IF (LocalVar%VS_ExceedTime>time_lim) THEN
+							IF (LocalVar%GenSpeedF>=(rad_lower_lim+((rad_upper_lim-rad_lower_lim)/hold_zone_divison))  .AND. LocalVar%VS_ExceedTime>time_lim) THEN
+								!We are allowing ride up due to the time we are holding at the lower limit and the fact that the actual generator speed moves a good amount beyond the lower bound of our frequency exclusion zone
 								print *,"MSG67: Allowing ride up."
-								VS_RefSpd=rad_upper_lim
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_lower_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=VS_RefSpd*(1-excl_fact)+rad_lower_lim*excl_fact 
+								
 								LocalVar%VS_ride_up=1.0
 								LocalVar%VS_ExceedStart=LocalVar%Time
 							ELSE
 								if (msg_var>0.0) THEN
 									print *,"MSG68: Hold at lower limit."
 								ENDIF
-								VS_RefSpd=rad_lower_lim
+								!We are enforcing the lower limit setpoint stricter, the more we move away from it
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_lower_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=MIN(VS_RefSpd*(1-excl_fact)+rad_lower_lim*excl_fact,VS_RefSpd)
 								IF (LocalVar%VS_ExceedStart== 0.0) THEN
 									LocalVar%VS_ExceedStart=LocalVar%Time
 								ENDIF
 							ENDIF
 						ELSE
-							IF (LocalVar%VS_ExceedTime>time_lim) THEN
+							IF (LocalVar%GenSpeedF<=(rad_upper_lim-((rad_upper_lim-rad_lower_lim)/hold_zone_divison)) .AND. LocalVar%VS_ExceedTime>time_lim) THEN
+								!We are allowing ride down due to the time we are holding at the upper limit and the fact that the actual generator speed moves a good amount below the upper bound of our frequency exclusion zone
 								print *,"MSG67: Allowing ride down."
-								VS_RefSpd=rad_lower_lim
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_upper_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=VS_RefSpd*(1-excl_fact)+rad_upper_lim*excl_fact
+								
 								LocalVar%VS_ride_down=1.0
 								LocalVar%VS_ExceedStart=LocalVar%Time
 							ELSE
 								if (msg_var>0.0) THEN
 									print *,"MSG68: Hold at upper limit."
 								ENDIF
-								VS_RefSpd=rad_upper_lim
+								!We are enforcing the upper limit setpoint stricter, the more we move away from it
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_upper_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=MAX(VS_RefSpd*(1-excl_fact)+rad_upper_lim*excl_fact,VS_RefSpd)
 								IF (LocalVar%VS_ExceedStart== 0.0) THEN
 									LocalVar%VS_ExceedStart=LocalVar%Time
 								ENDIF
 							ENDIF
 						ENDIF
 					ENDIF
-				ENDIF
+				ENDIF		
 			ENDIF
 			
 			!Above exclusion zone, all good
-			IF (LocalVar%GenSpeedF >= rad_upper_lim) THEN
-				!IF (VS_RefSpd > rad_upper_lim) THEN 
+			IF (LocalVar%GenSpeedF >= rad_upper_lim) THEN 
 					LocalVar%VS_ride_down=0.0
 					LocalVar%VS_ride_up=0.0
 					LocalVar%VS_ExceedStart=0.0
@@ -371,11 +405,17 @@ CONTAINS
 			
 			!Below exculsion zone, all good
 			IF (LocalVar%GenSpeedF <= rad_lower_lim) THEN
-				!IF (VS_RefSpd < rad_lower_lim) THEN 
 					LocalVar%VS_ride_down=0.0
 					LocalVar%VS_ride_up=0.0
 					LocalVar%VS_ExceedStart=0.0
 				!ENDIF
+			ENDIF
+			
+			VS_RefSpd = saturate(VS_RefSpd,CntrPar%VS_MinOMSpd, CntrPar%VS_RefSpd)
+				
+			if (msg_var>0.0) THEN
+				print *,"excl fact:",excl_fact
+				print *,"VS setpoint :",(VS_RefSpd /(2*3.1415927))*60
 			ENDIF
 			
         ELSE
@@ -406,6 +446,7 @@ CONTAINS
         
         ! Region 3 minimum pitch angle for state machine
         LocalVar%VS_Rgn3Pitch = LocalVar%PC_MinPit + CntrPar%PC_Switch
+		
 
     END SUBROUTINE ComputeVariablesSetpoints
     ! -----------------------------------------------------------------------------------
@@ -700,7 +741,7 @@ CONTAINS
             
 			LocalVar%VS_ExceedTime  = 0.0     
 			LocalVar%VS_ride_up  = 0.0  
-			LocalVar%VS_ride_down  = 0.0						 
+			LocalVar%VS_ride_down  = 0.0			
             ! Check validity of input parameters:
             CALL Assert(LocalVar, CntrPar, avrSWAP, aviFAIL, ErrMsg, size_avcMSG)
             
