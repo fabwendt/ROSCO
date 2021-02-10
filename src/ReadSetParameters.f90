@@ -226,7 +226,7 @@ CONTAINS
     ! -----------------------------------------------------------------------------------
     ! Calculate setpoints for primary control actions    
     SUBROUTINE ComputeVariablesSetpoints(CntrPar, LocalVar, objInst)
-        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances, PerformanceData
+        USE ROSCO_Types, ONLY : ControlParameters, LocalVariables, ObjectInstances
         USE Constants
         ! Allocate variables
         TYPE(ControlParameters), INTENT(INOUT)  :: CntrPar
@@ -324,6 +324,12 @@ CONTAINS
 							ENDIF
 							
 							!Blend between optimum setpoint and lower limit (use slow_trans time period to smoothen jump to rad_lower_lim), once approaching rad_lower_lim, also move away from rad_lower_lim setpoint and towards the optimum speed setpoint
+							if (LocalVar%VS_ExceedTime/slow_transt < 1.) THEN
+								!We are easing in to the ride down, use the same setpoint modifications as when holding at the upper limit
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_upper_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=MAX(VS_RefSpd*(1-excl_fact)+rad_upper_lim*excl_fact,VS_RefSpd)
+							ENDIF
+							
 							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_lower_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
 							VS_RefSpd=MIN(rad_lower_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
 							
@@ -344,6 +350,12 @@ CONTAINS
 							ENDIF
 							
 							!Blend between optimum setpoint and upper limit (use slow_trans time period to smoothen jump to rad_upper_lim), once approaching rad_upper_lim, also move away from rad_upper_lim setpoint and towards the optimum speed setpoint
+							if (LocalVar%VS_ExceedTime/slow_transt < 1.) THEN
+								!We are easing in to the ride up, use the same setpoint modifications as when holding at the lower limit
+								excl_fact=MIN(ABS(LocalVar%GenSpeedF-rad_lower_lim)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison),1.)
+								VS_RefSpd=MIN(VS_RefSpd*(1-excl_fact)+rad_lower_lim*excl_fact,VS_RefSpd)
+							ENDIF
+							
 							excl_fact=MIN(LocalVar%VS_ExceedTime/slow_transt,ABS((rad_upper_lim-LocalVar%GenSpeedF)/((rad_upper_lim-rad_lower_lim)/hold_zone_divison)),1.)
 							VS_RefSpd=MAX(rad_upper_lim*excl_fact+VS_RefSpd*(1-excl_fact),VS_RefSpd)
 							
