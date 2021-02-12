@@ -276,11 +276,11 @@ CONTAINS
 			!How long we need to hold a lower/upper limit before we can consider ride up/down:
 			time_lim=25.0
 			!How long until we cancle a ride up/down:
-			transit_time=10.0
+			transit_time=20.0
 			!Used to define the range when we allow ride up/down due to large rotor speed excursions from upper/lower limit... Larger number, smaller excusions will trigger ride up/down:
 			hold_zone_divison=4
 			!How long are we lingering close to the optimal speed setting before we move the setpoint to the lower/upper limit when riding down/up:
-			slow_transt=4.
+			slow_transt=12.
 			
 			rpm_upper_lim=6.3+6.3*0.12
 			rpm_lower_lim=6.3-6.3*0.12
